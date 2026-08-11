@@ -47,11 +47,11 @@ struct ContainArgs {
     #[arg(short, long)]
     sandbox_schemes: Vec<String>,
 
-    /// Add a file or match to allow, format "scheme:/dir/dir/file"
+    /// Add a file or match to allow, format "/scheme/scheme-name/dir/dir/file"
     #[arg(short, long)]
     file: Vec<String>,
 
-    /// Include directory(s) or prefix to allow unchanged, format "scheme:/dir/dir"
+    /// Include directory(s) or prefix to allow unchanged, format "/scheme/scheme-name/dir/dir"
     #[arg(short, long)]
     dir: Vec<String>,
 
@@ -76,7 +76,7 @@ struct WorkingDir {
     cwd: Option<String>,
 }
 
-const CONFIG_FILE: &str = "file:/etc/contain.toml";
+const CONFIG_FILE: &str = "/scheme/file/etc/contain.toml";
 
 fn setup_logging(level: LevelFilter) -> Option<&'static RedoxLogger> {
     let mut logger = RedoxLogger::new().with_output(
@@ -149,25 +149,23 @@ pub fn main() {
         ContainConfig::from_file(&config_file)
             .map_err(|e| {
                 error!("could not read config from file {}: {}", CONFIG_FILE, e);
-                eprintln!("could not read config from file {}: {}", CONFIG_FILE, e);
-                let _ = syscall::exit(1);
+                let _ = std::process::exit(1);
             })
             .unwrap()
     };
 
     debug!("config from file {}: {:?}", CONFIG_FILE, config);
 
-    let root = match contain_args.working_dir.root {
-        Some(root) if root.contains(':') => Some(root.clone()),
-        Some(root) => Some(format!("file:/{}", root.trim_start_matches('/'))),
-        None => None,
-    };
-
-    let cwd = match contain_args.working_dir.cwd {
-        Some(cwd) if cwd.contains(':') => Some(cwd.clone()),
-        Some(cwd) => Some(format!("file:/{}", cwd.trim_start_matches('/'))),
-        None => None,
-    };
+    let root = contain_args
+        .working_dir
+        .root
+        .as_deref()
+        .map(contain::ensure_scheme_path);
+    let cwd = contain_args
+        .working_dir
+        .cwd
+        .as_deref()
+        .map(contain::ensure_scheme_path);
     assert!(root.is_some() || cwd.is_some()); // or both
 
     for s in contain_args.pass_schemes {
@@ -177,20 +175,26 @@ pub fn main() {
         config.sandbox_schemes.push(s.to_string());
     }
     for f in contain_args.file {
-        config.files.push(f.to_string());
+        config.add_file(&f);
     }
     for d in contain_args.dir {
-        config.dirs.push(d.to_string());
+        config.add_dir(&d);
     }
     // If there is a chroot, cwd is relative to root
     // or otherwise allowed.
     // If not, cwd is automatically allowed.
-    if cwd.is_some() && root.is_none() {
-        config.dirs.push(cwd.as_ref().unwrap().clone());
+    if let Some(ref cwd_path) = cwd {
+        if root.is_none() {
+            config.add_dir(cwd_path);
+        }
     }
 
-    assert!(config.files.iter().all(|f| f.contains(":/")));
-    assert!(config.dirs.iter().all(|d| d.contains(":/")));
+    if let Some(ref r) = root {
+        config.add_chroot(r);
+    }
+
+    assert!(config.files.iter().all(|f| f.starts_with("/scheme/")));
+    assert!(config.dirs.iter().all(|d| d.starts_with("/scheme/")));
     assert!(config
         .sandbox_schemes
         .iter()
@@ -199,43 +203,41 @@ pub fn main() {
 
     if contain_args.user.is_none() && contain_args.command.len() == 0 {
         error!("User was not specified and no command was provided.");
-        eprintln!("User was not specified and no command was provided.");
-        let _ = syscall::exit(1);
+        let _ = std::process::exit(1);
     }
 
     let mut command = if !contain_args.command.is_empty() {
         let mut cmd_iter = contain_args.command.iter();
-        let mut command = Command::new(cmd_iter.next().unwrap());
+        let prog = cmd_iter.next().unwrap();
+        let prog_path = if prog.starts_with('/') {
+            prog.to_string()
+        } else {
+            format!("/scheme/file/bin/{}", prog)
+        };
+        let mut command = Command::new(prog_path);
         for arg in cmd_iter {
             command.arg(&arg);
         }
         command
     } else {
-        // This is a placeholder command, to be filled in when we have the user info
-        Command::new("login")
+        Command::new("/scheme/file/bin/login")
     };
 
-    if cwd.is_some() {
-        command.current_dir(format!("{}", cwd.as_ref().unwrap()));
-    } else {
-        // This is a placeholder command, to be filled in when we have the user info
-        command.current_dir("/");
-    }
+    let target_cwd = cwd.as_deref().unwrap_or("/");
+    command.current_dir(contain::ensure_scheme_path(target_cwd));
 
     if contain_args.user.is_some() {
         let all_users = redox_users::AllUsers::authenticator(redox_users::Config::default())
             .map_err(|e| {
                 error!("failed to get authenticator, {}", e);
-                eprintln!("failed to get authenticator, {}", e);
-                let _ = syscall::exit(1);
+                let _ = std::process::exit(1);
             })
             .unwrap();
         let user = all_users
             .get_by_name(contain_args.user.as_ref().unwrap())
             .ok_or_else(|| {
                 error!("could not get user {}", contain_args.user.as_ref().unwrap());
-                eprintln!("could not get user {}", contain_args.user.as_ref().unwrap());
-                let _ = syscall::exit(1);
+                let _ = std::process::exit(1);
             })
             .unwrap();
 
@@ -244,7 +246,7 @@ pub fn main() {
         }
 
         if cwd.is_none() {
-            command.current_dir(&user.home);
+            command.current_dir(contain::ensure_scheme_path(&user.home));
             config.add_dir(&user.home)
         }
     }

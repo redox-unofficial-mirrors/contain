@@ -41,10 +41,14 @@ impl ContainConfig {
             root: None,
             pass_schemes: to_string_vec(&["rand", "null", "tcp", "udp", "thisproc"]),
             sandbox_schemes: to_string_vec(&["file"]),
-            files: to_string_vec(&["file:/dev/null"]),
-            dirs: to_string_vec(&["file:/bin"]),
-            rofiles: to_string_vec(&["file:/etc/passwd", "file:/etc/hostname", "file:/tmp"]),
-            rodirs: to_string_vec(&["file:/bin"]),
+            files: to_string_vec(&["/scheme/file/dev/null"]),
+            dirs: to_string_vec(&["/scheme/file/bin"]),
+            rofiles: to_string_vec(&[
+                "/scheme/file/etc/passwd",
+                "/scheme/file/etc/hostname",
+                "/scheme/file/tmp",
+            ]),
+            rodirs: to_string_vec(&["/scheme/file/bin"]),
         }
     }
 
@@ -95,14 +99,22 @@ impl ContainConfig {
     }
 
     pub fn add_chroot(&mut self, root: &str) {
-        self.root = Some(root.to_string());
+        self.root = Some(crate::ensure_scheme_path(root));
     }
 
     pub fn add_dir(&mut self, dir: &str) {
-        self.dirs.push(dir.to_string());
+        self.dirs.push(crate::ensure_scheme_path(dir));
     }
 
     pub fn add_rodir(&mut self, rodir: &str) {
-        self.rodirs.push(rodir.to_string());
+        self.rodirs.push(crate::ensure_scheme_path(rodir));
+    }
+
+    pub fn add_file(&mut self, file: &str) {
+        self.files.push(crate::ensure_scheme_path(file));
+    }
+
+    pub fn add_rofile(&mut self, rofile: &str) {
+        self.rofiles.push(crate::ensure_scheme_path(rofile));
     }
 }
