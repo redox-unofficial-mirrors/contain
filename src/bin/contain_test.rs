@@ -31,7 +31,12 @@ fn main() {
 
     let mut succeeded = 0;
     let mut failed = 0;
-    let tests = [test_exec, test_pass_schemes, test_sandbox_schemes, test_read_only];
+    let tests = [
+        test_exec,
+        test_pass_schemes,
+        test_sandbox_schemes,
+        test_read_only,
+    ];
     for test in tests {
         let (s, f) = test();
         succeeded += s;
@@ -49,7 +54,7 @@ fn test_exec() -> (u32, u32) {
     let mut config = ContainConfig::default();
     config.pass_schemes.push("thisproc".to_string());
     config.pass_schemes.push("rand".to_string());
-    let command = Command::new("file:/bin/ls");
+    let command = Command::new("/scheme/file/bin/ls");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == CONTAIN_EXEC_FAIL_EXIT * 256 => {
             debug!("empty scheme test succeeded: {:x}", exit_code);
@@ -70,11 +75,13 @@ fn test_exec() -> (u32, u32) {
     config.pass_schemes.push("thisproc".to_string());
     config.pass_schemes.push("rand".to_string());
     config.sandbox_schemes.push("file".to_string());
-    config.rofiles.push("file:/bin/cat".to_string());
-    config.rofiles.push("file:/bin/coreutils".to_string());
-    config.rofiles.push("file:/etc/passwd".to_string());
-    let mut command = Command::new("file:/bin/cat");
-    command.arg("file:/etc/passwd");
+    config.rofiles.push("/scheme/file/bin/cat".to_string());
+    config
+        .rofiles
+        .push("/scheme/file/bin/coreutils".to_string());
+    config.rofiles.push("/scheme/file/etc/passwd".to_string());
+    let mut command = Command::new("/scheme/file/bin/cat");
+    command.arg("/scheme/file/etc/passwd");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == 0 => {
             debug!("exec test succeeded");
@@ -102,9 +109,9 @@ fn test_pass_schemes() -> (u32, u32) {
     // config.pass_schemes.push("thisproc".to_string());
     // config.pass_schemes.push("rand".to_string());
     // config.sandbox_schemes.push("file".to_string());
-    // config.rofiles.push("file:/bin/cat".to_string());
-    // config.rofiles.push("file:/bin/coreutils".to_string());
-    // let mut command = Command::new("file:/bin/cat");
+    // config.rofiles.push("/scheme/file/bin/cat".to_string());
+    // config.rofiles.push("/scheme/file/bin/coreutils".to_string());
+    // let mut command = Command::new("/scheme/file/bin/cat");
     // command.arg("null:");
     // match run_contained(config, command) {
     //     Ok(exit_code) if exit_code == 1 * 256 => {
@@ -127,9 +134,11 @@ fn test_pass_schemes() -> (u32, u32) {
     config.pass_schemes.push("rand".to_string());
     config.pass_schemes.push("null".to_string());
     config.sandbox_schemes.push("file".to_string());
-    config.rofiles.push("file:/bin/cat".to_string());
-    config.rofiles.push("file:/bin/coreutils".to_string());
-    let mut command = Command::new("file:/bin/cat");
+    config.rofiles.push("/scheme/file/bin/cat".to_string());
+    config
+        .rofiles
+        .push("/scheme/file/bin/coreutils".to_string());
+    let mut command = Command::new("/scheme/file/bin/cat");
     command.arg("null:");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == 0 => {
@@ -159,12 +168,14 @@ fn test_sandbox_schemes() -> (u32, u32) {
     config.pass_schemes.push("rand".to_string());
     config.pass_schemes.push("null".to_string());
     config.sandbox_schemes.push("file".to_string());
-    config.rofiles.push("file:/bin/dd".to_string());
-    config.rofiles.push("file:/bin/coreutils".to_string());
-    config.rofiles.push("file:/etc/passwd".to_string());
-    let mut command = Command::new("file:/bin/dd");
-    command.arg("if=file:/etc/passwd");
-    command.arg("of=file:/tmp/passwd1");
+    config.rofiles.push("/scheme/file/bin/dd".to_string());
+    config
+        .rofiles
+        .push("/scheme/file/bin/coreutils".to_string());
+    config.rofiles.push("/scheme/file/etc/passwd".to_string());
+    let mut command = Command::new("/scheme/file/bin/dd");
+    command.arg("if=/scheme/file/etc/passwd");
+    command.arg("of=/scheme/file/tmp/passwd1");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == 1 * 256 => {
             debug!("sandbox schemes test succeeded");
@@ -186,13 +197,15 @@ fn test_sandbox_schemes() -> (u32, u32) {
     config.pass_schemes.push("rand".to_string());
     config.pass_schemes.push("null".to_string());
     config.sandbox_schemes.push("file".to_string());
-    config.rofiles.push("file:/bin/dd".to_string());
-    config.rofiles.push("file:/bin/coreutils".to_string());
-    config.rofiles.push("file:/etc/passwd".to_string());
-    config.dirs.push("file:/tmp".to_string());
-    let mut command = Command::new("file:/bin/dd");
-    command.arg("if=file:/etc/passwd");
-    command.arg("of=file:/tmp/passwd1");
+    config.rofiles.push("/scheme/file/bin/dd".to_string());
+    config
+        .rofiles
+        .push("/scheme/file/bin/coreutils".to_string());
+    config.rofiles.push("/scheme/file/etc/passwd".to_string());
+    config.dirs.push("/scheme/file/tmp".to_string());
+    let mut command = Command::new("/scheme/file/bin/dd");
+    command.arg("if=/scheme/file/etc/passwd");
+    command.arg("of=/scheme/file/tmp/passwd1");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == 0 => {
             debug!("sandbox schemes test succeeded");
@@ -221,13 +234,15 @@ fn test_read_only() -> (u32, u32) {
     config.pass_schemes.push("rand".to_string());
     config.pass_schemes.push("null".to_string());
     config.sandbox_schemes.push("file".to_string());
-    config.rofiles.push("file:/bin/dd".to_string());
-    config.rofiles.push("file:/bin/coreutils".to_string());
-    config.rofiles.push("file:/etc/passwd".to_string());
-    config.rofiles.push("file:/tmp/passwd2".to_string());
-    let mut command = Command::new("file:/bin/dd");
-    command.arg("if=file:/etc/passwd");
-    command.arg("of=file:/tmp/passwd2");
+    config.rofiles.push("/scheme/file/bin/dd".to_string());
+    config
+        .rofiles
+        .push("/scheme/file/bin/coreutils".to_string());
+    config.rofiles.push("/scheme/file/etc/passwd".to_string());
+    config.rofiles.push("/scheme/file/tmp/passwd2".to_string());
+    let mut command = Command::new("/scheme/file/bin/dd");
+    command.arg("if=/scheme/file/etc/passwd");
+    command.arg("of=/scheme/file/tmp/passwd2");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == 1 * 256 => {
             debug!("read only test succeeded");
@@ -249,14 +264,16 @@ fn test_read_only() -> (u32, u32) {
     config.pass_schemes.push("rand".to_string());
     config.pass_schemes.push("null".to_string());
     config.sandbox_schemes.push("file".to_string());
-    config.rofiles.push("file:/bin/dd".to_string());
-    config.rofiles.push("file:/bin/coreutils".to_string());
-    config.rofiles.push("file:/etc/passwd".to_string());
-    config.files.push("file:/tmp".to_string());
-    config.files.push("file:/tmp/passwd2".to_string());
-    let mut command = Command::new("file:/bin/dd");
-    command.arg("if=file:/etc/passwd");
-    command.arg("of=file:/tmp/passwd2");
+    config.rofiles.push("/scheme/file/bin/dd".to_string());
+    config
+        .rofiles
+        .push("/scheme/file/bin/coreutils".to_string());
+    config.rofiles.push("/scheme/file/etc/passwd".to_string());
+    config.files.push("/scheme/file/tmp".to_string());
+    config.files.push("/scheme/file/tmp/passwd2".to_string());
+    let mut command = Command::new("/scheme/file/bin/dd");
+    command.arg("if=/scheme/file/etc/passwd");
+    command.arg("of=/scheme/file/tmp/passwd2");
     match run_contained(config, command) {
         Ok(exit_code) if exit_code == 0 => {
             debug!("read only test succeeded");

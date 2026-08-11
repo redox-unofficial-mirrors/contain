@@ -1,15 +1,16 @@
 use std::{
+    fs,
     os::unix::process::CommandExt,
     process::{exit, Command},
 };
 
 use libredox::call::waitpid;
-use libredox::error::{Error, EIO};
-use libredox::flag::O_RDONLY;
-use libredox::Fd;
 use log::{debug, error};
 
-use crate::{ContainConfig, ContainError, ContainResult, ContainThread, CONTAIN_EXEC_FAIL_EXIT};
+use crate::{
+    is_file_matched, is_path_in_dir, ContainConfig, ContainError, ContainResult, ContainThread,
+    CONTAIN_EXEC_FAIL_EXIT,
+};
 
 /// Spawn and execute a command with no namespace changes.
 /// Used to execute a root shell.
@@ -46,29 +47,16 @@ pub fn run_contained(config: ContainConfig, command: Command) -> ContainResult<i
 
 /// List all schemes.
 fn list_schemes() -> ContainResult<Vec<String>> {
-    // get a list of all the schemes in the current namespace
-    let mut buf = [0; 4096];
-    let count = match Fd::open(":", O_RDONLY, 0) {
-        Ok(fd) => match fd.read(&mut buf) {
-            Ok(n) => n,
-            Err(e) => {
-                error!("Could not read root scheme");
-                return Err(ContainError::SyscallError(e));
-            }
-        },
-        Err(e) => {
-            error!("Could not open root scheme");
-            return Err(ContainError::SyscallError(e));
+    let mut scheme_names = Vec::new();
+
+    for entry_result in fs::read_dir("/scheme").map_err(|e| ContainError::io_error(e))? {
+        let entry = entry_result.map_err(|e| ContainError::io_error(e))?;
+
+        if let Some(name_str) = entry.file_name().to_str() {
+            scheme_names.push(name_str.to_string());
         }
-    };
-    Ok(String::from_utf8(buf[0..count].to_vec())
-        .map_err(|_e| {
-            error!("Could not convert schemes to uft8");
-            ContainError::SyscallError(Error::new(EIO))
-        })?
-        .split_ascii_whitespace()
-        .map(|s| s.to_string())
-        .collect())
+    }
+    Ok(scheme_names)
 }
 
 /// Validate the config.
@@ -99,11 +87,8 @@ fn validate_config(mut config: ContainConfig) -> ContainResult<ContainConfig> {
     // Error if the chroot is not a sandboxed scheme
     if config.root.is_some()
         && !config.sandbox_schemes.iter().any(|scheme| {
-            config
-                .root
-                .as_ref()
-                .unwrap()
-                .starts_with(&format!("{}:", scheme))
+            let root_str = config.root.as_ref().unwrap();
+            is_path_in_dir(root_str, &format!("/scheme/{scheme}"))
         })
     {
         error!("root {} is not in a sandboxed scheme", config.root.unwrap());
@@ -117,7 +102,7 @@ fn validate_config(mut config: ContainConfig) -> ContainResult<ContainConfig> {
         config
             .sandbox_schemes
             .iter()
-            .any(|scheme| f.starts_with(&format!("{scheme}:")))
+            .any(|scheme| is_path_in_dir(f, &format!("/scheme/{scheme}")))
     });
     config.dirs.sort();
     config.dirs.dedup();
@@ -125,7 +110,7 @@ fn validate_config(mut config: ContainConfig) -> ContainResult<ContainConfig> {
         config
             .sandbox_schemes
             .iter()
-            .any(|scheme| d.starts_with(&format!("{scheme}:")))
+            .any(|scheme| is_path_in_dir(d, &format!("/scheme/{scheme}")))
     });
     config.rofiles.sort();
     config.rofiles.dedup();
@@ -133,7 +118,7 @@ fn validate_config(mut config: ContainConfig) -> ContainResult<ContainConfig> {
         config
             .sandbox_schemes
             .iter()
-            .any(|scheme| f.starts_with(&format!("{scheme}:")))
+            .any(|scheme| is_path_in_dir(f, &format!("/scheme/{scheme}")))
     });
     config.rodirs.sort();
     config.rodirs.dedup();
@@ -141,7 +126,7 @@ fn validate_config(mut config: ContainConfig) -> ContainResult<ContainConfig> {
         config
             .sandbox_schemes
             .iter()
-            .any(|scheme| d.starts_with(&format!("{scheme}:")))
+            .any(|scheme| is_path_in_dir(d, &format!("/scheme/{scheme}")))
     });
     debug!("validated: {:?}", &config);
     Ok(config)
@@ -158,20 +143,31 @@ pub fn run_in_namespace(mut command: Command, namespace: usize) -> ContainResult
     }
     let pid = pid as usize;
     if pid == 0 {
-        syscall::setrens(namespace, namespace).map_err(|e| {
-            error!("child failed to enter restricted namespace, {}", e);
-            ContainError::syscall_error(e)
-        })?;
+        let res = libredox::call::setns(namespace);
+
+        if let Err(e) = res {
+            error!("contain: setrens failed: {}", e);
+            exit(CONTAIN_EXEC_FAIL_EXIT);
+        }
 
         let err = command.exec();
+        if log::log_enabled!(log::Level::Error) {
+            // FIXME: Make logger async-signal-safe
+            eprintln!("contain: exec failed: {}", err);
+        }
 
-        error!("failed to launch {:?}: {}", command, err);
         exit(CONTAIN_EXEC_FAIL_EXIT);
     } else {
+        debug!("parent process: waiting for child pid {}", pid);
         let mut status = 0;
-        let _ = waitpid(pid, &mut status, 0).map_err(|e| {
+        let res = waitpid(pid, &mut status, 0);
+        debug!(
+            "parent process: waitpid returned {:?}, status={:X}",
+            res, status
+        );
+        res.map_err(|e| {
             error!("waitpid({}) returned error: {}", pid, e);
-            ContainError::syscall_error(e)
+            ContainError::syscall_error(e.into())
         })?;
 
         loop {
