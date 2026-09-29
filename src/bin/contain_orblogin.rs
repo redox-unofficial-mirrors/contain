@@ -126,7 +126,7 @@ fn login_window(
     let font = Font::find(Some("Sans"), None, None)?;
 
     let image_mode = BackgroundMode::from_str("zoom");
-    let image_path = "/ui/login.png";
+    let image_path = "/usr/share/ui/login.png";
     let image = Image::from_path(image_path)?;
 
     let (display_width, display_height) = orbclient::get_display_size()?;
